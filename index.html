@@ -1,0 +1,2493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- No CSP meta tag: Google Apps Script serves this page inside its own
+     sandboxed iframe and injects a bootstrapping script into the same
+     document to run its google.script.run bridge. A self-authored
+     script-src/base-uri policy here - even one that allows 'unsafe-inline'
+     for our own script - conflicts with that injection and silently kills
+     ALL script execution on the page (confirmed: zero network requests ever
+     fired, the inline oninput handler never ran). Apps Script's iframe
+     sandbox is already a real isolation boundary; escapeHtml()/safeUrl()
+     still guard against XSS and malicious URLs at the DOM level regardless. -->
+<title>Quote Search Engine - Live Quote Resolver</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='48' y2='48' gradientUnits='userSpaceOnUse'%3E%3Cstop offset='0' stop-color='%2338bdf8'/%3E%3Cstop offset='1' stop-color='%236366f1'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='48' height='48' rx='12' fill='url(%23g)'/%3E%3Cg transform='translate(9.6,9.6) scale(1.2)'%3E%3Cpath fill='%23060913' d='M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 15h14l-4.5-6-3.5 4.51-2.5-3.01L5 15z'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+ :root {
+   --bg: #060913;
+   --panel: #0d1322;
+   --panel-raised: #151d30;
+   --line: #222f47;
+   --line-soft: #141c2e;
+   --text: #f1f5f9;
+   --text-dim: #94a3b8;
+   --text-faint: #8393b8;
+
+   --cyan-main: #38bdf8;
+   --indigo-accent: #6366f1;
+   --teal-accent: #2dd4bf;
+   --amber-accent: #fbbf24;
+   --red-accent: #f87171;
+   --emerald-glow: rgba(45, 212, 191, 0.15);
+
+   --font-mono: 'JetBrains Mono', monospace;
+   --font-body: 'Plus Jakarta Sans', sans-serif;
+   --img-letterbox: #02040a;
+ }
+
+ /* Follows the OS/browser preference rather than a manual toggle - no stored
+    preference to manage, no extra control to add to an already-dense header.
+    Only the surface/text/line tokens change; the cyan/indigo/teal accent
+    colors and the always-dark logo-icon/btn-primary text stay the same in
+    both themes, since those sit on their own fixed-color backgrounds. */
+ @media (prefers-color-scheme: light) {
+   :root {
+     --bg: #f4f6fb;
+     --panel: #ffffff;
+     --panel-raised: #eef1f8;
+     --line: #d8deeb;
+     --line-soft: #e6eaf3;
+     --text: #0f172a;
+     --text-dim: #475569;
+     --text-faint: #64748b;
+     --emerald-glow: rgba(13, 148, 136, 0.12);
+     --img-letterbox: #e6eaf3;
+   }
+ }
+
+ * { box-sizing: border-box; }
+
+ body {
+   margin: 0;
+   background:
+     radial-gradient(circle at 10% 10%, rgba(56, 189, 248, 0.08), transparent 40%),
+     radial-gradient(circle at 90% 85%, rgba(99, 102, 241, 0.08), transparent 45%),
+     var(--bg);
+   color: var(--text);
+   font-family: var(--font-body);
+   font-size: 14px;
+   line-height: 1.6;
+   min-height: 100vh;
+ }
+
+ .wrap {
+   max-width: 900px;
+   margin: 0 auto;
+   padding: 40px 24px 80px;
+ }
+
+ .hdr {
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   flex-wrap: wrap;
+   gap: 10px;
+   margin-bottom: 28px;
+   padding-bottom: 16px;
+   border-bottom: 1px solid var(--line);
+ }
+
+ .brand {
+   display: flex;
+   align-items: center;
+   gap: 14px;
+ }
+
+ .logo-icon {
+   width: 42px;
+   height: 42px;
+   background: linear-gradient(135deg, var(--cyan-main), var(--indigo-accent));
+   border-radius: 10px;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+ }
+
+ .logo-icon svg {
+   width: 22px;
+   height: 22px;
+   fill: #060913;
+ }
+
+ .hdr h1 {
+   font-family: var(--font-body);
+   font-size: clamp(17px, 4.5vw, 22px);
+   font-weight: 800;
+   margin: 0;
+   color: var(--text);
+   letter-spacing: -0.02em;
+ }
+
+ .tag-pill {
+   background: rgba(56, 189, 248, 0.1);
+   border: 1px solid rgba(56, 189, 248, 0.25);
+   color: var(--cyan-main);
+   font-family: var(--font-mono);
+   font-size: clamp(9px, 2.4vw, 11px);
+   font-weight: 700;
+   padding: 4px 10px;
+   border-radius: 6px;
+   text-transform: uppercase;
+   white-space: nowrap;
+   flex-shrink: 0;
+ }
+
+ .input-card {
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 14px;
+   padding: 20px;
+   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+ }
+
+ .input-label {
+   display: block;
+   font-family: var(--font-mono);
+   font-size: 10px;
+   text-transform: uppercase;
+   letter-spacing: 0.08em;
+   color: var(--text-faint);
+   font-weight: 700;
+   margin-bottom: 8px;
+ }
+
+ textarea {
+   width: 100%;
+   min-height: 95px;
+   background: var(--panel-raised);
+   border: 1px solid var(--line);
+   border-radius: 8px;
+   color: var(--text);
+   font-family: var(--font-body);
+   font-size: 14px;
+   padding: 14px;
+   resize: vertical;
+   outline: none;
+   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+ }
+
+ textarea::placeholder {
+   color: var(--text-faint);
+ }
+
+ textarea:focus {
+   border-color: var(--cyan-main);
+   box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+ }
+
+ .char-counter {
+   font-family: var(--font-mono);
+   font-size: 11px;
+   color: var(--text-faint);
+   text-align: right;
+   margin-top: 6px;
+ }
+
+ .char-counter.near-limit {
+   color: var(--amber-accent);
+ }
+
+ .char-counter.at-limit {
+   color: var(--red-accent);
+ }
+
+ .action-row {
+   display: flex;
+   gap: 10px;
+   margin-top: 16px;
+   align-items: center;
+   flex-wrap: wrap;
+ }
+
+ button.btn-primary {
+   background: linear-gradient(135deg, var(--cyan-main), var(--indigo-accent));
+   color: #060913;
+   border: none;
+   border-radius: 6px;
+   font-family: var(--font-body);
+   font-weight: 700;
+   font-size: 13px;
+   padding: 10px 22px;
+   cursor: pointer;
+   transition: opacity 0.15s ease, transform 0.15s ease;
+ }
+
+ button.btn-primary:hover {
+   opacity: 0.92;
+   transform: translateY(-1px);
+ }
+
+ button.btn-primary:disabled {
+   opacity: 0.5;
+   cursor: not-allowed;
+   transform: none;
+ }
+
+ button.btn-secondary {
+   background: var(--panel-raised);
+   color: var(--text-dim);
+   border: 1px solid var(--line);
+   border-radius: 6px;
+   font-family: var(--font-body);
+   font-weight: 600;
+   font-size: 12px;
+   padding: 9px 13px;
+   cursor: pointer;
+   transition: all 0.15s ease;
+ }
+
+ button.btn-secondary:hover {
+   color: var(--text);
+   border-color: var(--cyan-main);
+ }
+
+ .history-section {
+   margin-top: 14px;
+   padding-top: 14px;
+   border-top: 1px solid var(--line-soft);
+   display: none;
+ }
+
+ .history-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   margin-bottom: 8px;
+ }
+
+ .history-label {
+   font-family: var(--font-mono);
+   font-size: 10px;
+   text-transform: uppercase;
+   color: var(--text-faint);
+   font-weight: 700;
+ }
+
+ button.history-clear-all {
+   background: none;
+   border: none;
+   color: var(--text-faint);
+   font-family: var(--font-mono);
+   font-size: 10px;
+   text-transform: uppercase;
+   cursor: pointer;
+   padding: 0;
+ }
+
+ button.history-clear-all:hover {
+   color: var(--red-accent);
+   text-decoration: underline;
+ }
+
+ .history-row {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+ }
+
+ .history-chip {
+   display: inline-flex;
+   align-items: center;
+   background: var(--panel-raised);
+   border: 1px dashed var(--line);
+   border-radius: 6px;
+   max-width: 360px;
+   transition: all 0.15s ease;
+ }
+
+ .history-chip:hover {
+   background: rgba(56, 189, 248, 0.1);
+   border-color: var(--cyan-main);
+ }
+
+ button.btn-history {
+   background: none;
+   border: none;
+   font-family: var(--font-mono);
+   font-size: 11px;
+   padding: 6px 4px 6px 10px;
+   cursor: pointer;
+   overflow: hidden;
+   white-space: nowrap;
+   text-overflow: ellipsis;
+   display: inline-flex;
+   align-items: center;
+   gap: 6px;
+   min-width: 0;
+ }
+
+ .history-chip:hover .history-detail {
+   color: var(--text);
+ }
+
+ .history-type {
+   color: var(--teal-accent);
+   font-weight: 700;
+   flex-shrink: 1;
+   max-width: 130px;
+   overflow: hidden;
+   white-space: nowrap;
+   text-overflow: ellipsis;
+ }
+
+ .history-detail {
+   color: var(--text-dim);
+   overflow: hidden;
+   text-overflow: ellipsis;
+   min-width: 0;
+ }
+
+ button.history-delete {
+   background: none;
+   border: none;
+   color: var(--text-faint);
+   font-size: 14px;
+   line-height: 1;
+   padding: 6px 8px 6px 4px;
+   cursor: pointer;
+   flex-shrink: 0;
+ }
+
+ button.history-delete:hover {
+   color: var(--red-accent);
+ }
+
+ .history-time {
+   color: var(--text-faint);
+   font-size: 10px;
+   flex-shrink: 0;
+ }
+
+ .example-section {
+   margin-top: 14px;
+   padding-top: 14px;
+   border-top: 1px solid var(--line-soft);
+ }
+
+ button.btn-example {
+   background: var(--panel-raised);
+   border: 1px solid var(--line);
+   border-radius: 6px;
+   color: var(--text-dim);
+   font-family: var(--font-mono);
+   font-size: 11px;
+   padding: 6px 12px;
+   cursor: pointer;
+   transition: all 0.15s ease;
+ }
+
+ button.btn-example:hover {
+   color: var(--text);
+   border-color: var(--cyan-main);
+   background: rgba(56, 189, 248, 0.08);
+ }
+
+ #result {
+   margin-top: 32px;
+   display: none;
+ }
+
+ .status-banner {
+   font-family: var(--font-mono);
+   font-size: 11px;
+   color: var(--teal-accent);
+   background: var(--emerald-glow);
+   border: 1px solid rgba(45, 212, 191, 0.3);
+   padding: 8px 14px;
+   border-radius: 6px;
+   margin-bottom: 20px;
+   display: flex;
+   align-items: center;
+   gap: 8px;
+ }
+
+ .status-banner.status-info {
+   color: var(--cyan-main);
+   background: rgba(56, 189, 248, 0.08);
+   border-color: rgba(56, 189, 248, 0.25);
+ }
+
+ .status-banner.status-warn {
+   color: var(--amber-accent);
+   background: rgba(251, 191, 36, 0.1);
+   border-color: rgba(251, 191, 36, 0.3);
+ }
+
+ .status-banner.status-error {
+   color: var(--red-accent);
+   background: rgba(248, 113, 113, 0.1);
+   border-color: rgba(248, 113, 113, 0.3);
+ }
+
+ .match-hero {
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-top: 4px solid var(--cyan-main);
+   border-radius: 14px;
+   padding: 24px;
+   margin-bottom: 20px;
+   box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4);
+ }
+
+ .work-title-badge {
+   font-family: var(--font-mono);
+   font-size: 11px;
+   text-transform: uppercase;
+   color: var(--cyan-main);
+   letter-spacing: 0.12em;
+   font-weight: 700;
+   margin-bottom: 6px;
+ }
+
+ .media-title {
+   font-size: clamp(22px, 6vw, 30px);
+   font-weight: 800;
+   margin: 0 0 6px 0;
+   color: var(--text);
+   letter-spacing: -0.02em;
+   text-shadow: 0 0 25px rgba(56, 189, 248, 0.25);
+ }
+
+ .media-author {
+   font-size: 16px;
+   font-weight: 600;
+   color: var(--teal-accent);
+   margin-bottom: 12px;
+ }
+
+ .media-meta {
+   color: var(--text-dim);
+   font-size: 13px;
+   margin-bottom: 20px;
+ }
+
+ .media-gallery {
+   display: grid;
+   grid-template-columns: repeat(auto-fill, minmax(200px, 260px));
+   justify-content: start;
+   gap: 16px;
+   margin-bottom: 20px;
+ }
+
+ .asset-card {
+   background: var(--panel-raised);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   overflow: hidden;
+   display: flex;
+   flex-direction: column;
+ }
+
+ .asset-img {
+   width: 100%;
+   height: 240px;
+   object-fit: contain;
+   background: var(--img-letterbox);
+   display: block;
+ }
+
+ .asset-caption {
+   padding: 8px 12px;
+   font-size: 11px;
+   font-weight: 700;
+   font-family: var(--font-mono);
+   color: var(--text-dim);
+   text-transform: uppercase;
+   background: rgba(0, 0, 0, 0.3);
+   border-top: 1px solid var(--line-soft);
+   text-align: center;
+ }
+
+ .canonical-box {
+   background: var(--panel-raised);
+   border-left: 4px solid var(--cyan-main);
+   padding: 14px 18px;
+   border-radius: 0 8px 8px 0;
+ }
+
+ .canonical-box .label {
+   font-family: var(--font-mono);
+   font-size: 10px;
+   text-transform: uppercase;
+   color: var(--text-faint);
+   font-weight: 700;
+   display: block;
+   margin-bottom: 4px;
+ }
+
+ .canonical-box .quote-text {
+   font-size: 15px;
+   font-weight: 600;
+   color: var(--text);
+   font-style: italic;
+ }
+
+ .canonical-box.verified-box {
+   border-left-color: var(--teal-accent);
+   margin-top: 12px;
+ }
+
+ .canonical-box.verified-box .label {
+   color: var(--teal-accent);
+ }
+
+ .canonical-box .label-row {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 10px;
+ }
+
+ button.btn-copy-inline {
+   background: none;
+   border: none;
+   color: var(--teal-accent);
+   font-family: var(--font-mono);
+   font-size: 10px;
+   text-transform: uppercase;
+   cursor: pointer;
+   padding: 0;
+   flex-shrink: 0;
+ }
+
+ button.btn-copy-inline:hover {
+   text-decoration: underline;
+ }
+
+ .section-header {
+   font-family: var(--font-mono);
+   font-size: 12px;
+   font-weight: 700;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+   color: var(--cyan-main);
+   margin: 24px 0 12px;
+ }
+
+ .grid-cards {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+   gap: 12px;
+ }
+
+ .info-card {
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   padding: 16px;
+ }
+
+ .info-card .card-title {
+   color: var(--text-faint);
+   font-family: var(--font-mono);
+   font-size: 10px;
+   font-weight: 700;
+   text-transform: uppercase;
+   margin-bottom: 4px;
+ }
+
+ .info-card .card-value {
+   color: var(--text);
+   font-size: 13px;
+   font-weight: 600;
+ }
+
+ .trivia-list {
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   overflow: hidden;
+ }
+
+ .trivia-item {
+   padding: 14px 18px;
+   border-bottom: 1px solid var(--line-soft);
+   display: flex;
+   gap: 12px;
+   align-items: flex-start;
+ }
+
+ .trivia-item:last-child {
+   border-bottom: none;
+ }
+
+ .trivia-bullet {
+   color: var(--cyan-main);
+   font-weight: bold;
+   font-size: 12px;
+   margin-top: 2px;
+   flex-shrink: 0;
+ }
+
+ .trivia-text {
+   font-size: 13px;
+   color: var(--text-dim);
+ }
+
+ .footer-text {
+   margin-top: 40px;
+   text-align: center;
+   font-family: var(--font-mono);
+   font-size: 11px;
+   color: var(--text-faint);
+   border-top: 1px solid var(--line-soft);
+   padding-top: 20px;
+ }
+
+ .candidate-list {
+   display: flex;
+   flex-direction: column;
+   gap: 10px;
+ }
+
+ button.btn-candidate {
+   display: grid;
+   grid-template-columns: auto 1fr auto;
+   align-items: center;
+   gap: 4px 12px;
+   width: 100%;
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-radius: 10px;
+   padding: 12px 16px;
+   text-align: left;
+   cursor: pointer;
+   color: var(--text);
+   font-family: var(--font-body);
+   transition: all 0.15s ease;
+ }
+
+ button.btn-candidate:hover {
+   border-color: var(--cyan-main);
+   background: rgba(56, 189, 248, 0.06);
+ }
+
+ button.btn-candidate:focus-visible {
+   outline: 2px solid var(--cyan-main);
+   outline-offset: 2px;
+ }
+
+ button.btn-candidate:disabled {
+   opacity: 0.55;
+   cursor: default;
+ }
+
+ button.btn-candidate.btn-candidate-selected {
+   border-color: var(--teal-accent);
+   background: rgba(45, 212, 191, 0.12);
+   opacity: 1;
+ }
+
+ .candidate-score {
+   font-family: var(--font-mono);
+   font-size: 11px;
+   font-weight: 700;
+   color: var(--teal-accent);
+   background: var(--emerald-glow);
+   border-radius: 5px;
+   padding: 3px 7px;
+   white-space: nowrap;
+ }
+
+ .candidate-title {
+   font-weight: 700;
+   font-size: 14px;
+ }
+
+ .candidate-source {
+   font-family: var(--font-mono);
+   font-size: 10px;
+   text-transform: uppercase;
+   color: var(--text-faint);
+   white-space: nowrap;
+ }
+
+ .candidate-snippet {
+   grid-column: 1 / -1;
+   font-size: 12px;
+   color: var(--text-dim);
+   margin-top: 2px;
+   display: -webkit-box;
+   -webkit-line-clamp: 2;
+   -webkit-box-orient: vertical;
+   overflow: hidden;
+ }
+
+ /* A bare percentage number doesn't communicate "good vs. shaky" at a glance
+    the way a colored bar does - tier color mirrors the same thresholds the
+    app already uses to decide auto-accept vs. picker vs. low-confidence. */
+ .confidence-meter {
+   grid-column: 1 / -1;
+   width: 100%;
+   height: 5px;
+   background: var(--line-soft);
+   border-radius: 3px;
+   overflow: hidden;
+   margin-top: 4px;
+ }
+
+ .confidence-meter-fill {
+   height: 100%;
+   border-radius: 3px;
+ }
+
+ .confidence-meter-fill.tier-low { background: var(--red-accent); }
+ .confidence-meter-fill.tier-mid { background: var(--amber-accent); }
+ .confidence-meter-fill.tier-high { background: var(--teal-accent); }
+
+ .info-card .confidence-meter { margin-top: 8px; }
+
+ /* Re-triggered via a classList remove/reflow/add cycle in JS each time a
+    result or picker is rendered - a plain class addition wouldn't restart the
+    animation on the second and later renders since the class is already present. */
+ @keyframes resultReveal {
+   from { opacity: 0; transform: translateY(8px); }
+   to { opacity: 1; transform: translateY(0); }
+ }
+
+ #result.reveal {
+   animation: resultReveal 0.35s ease;
+ }
+
+ @keyframes shimmer {
+   0% { background-position: -400px 0; }
+   100% { background-position: 400px 0; }
+ }
+
+ .skeleton {
+   background: linear-gradient(90deg, var(--panel-raised) 25%, var(--line) 37%, var(--panel-raised) 63%);
+   background-size: 800px 100%;
+   animation: shimmer 1.4s linear infinite;
+   border-radius: 6px;
+ }
+
+ .skeleton-hero {
+   background: var(--panel);
+   border: 1px solid var(--line);
+   border-top: 4px solid var(--line);
+   border-radius: 14px;
+   padding: 24px;
+   margin-bottom: 20px;
+ }
+
+ .skeleton-line {
+   height: 13px;
+   margin-bottom: 12px;
+ }
+
+ .skeleton-line.w-30 { width: 30%; height: 11px; }
+ .skeleton-line.w-55 { width: 55%; height: 28px; }
+ .skeleton-line.w-70 { width: 70%; height: 16px; }
+ .skeleton-line.w-100 { width: 100%; }
+
+ .skeleton-grid {
+   display: grid;
+   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+   gap: 12px;
+   margin-top: 20px;
+ }
+
+ .skeleton-card {
+   height: 58px;
+   border-radius: 10px;
+ }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+ <div class="hdr">
+   <div class="brand">
+     <div class="logo-icon">
+       <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H3V5h18v14zM5 15h14l-4.5-6-3.5 4.51-2.5-3.01L5 15z"/></svg>
+     </div>
+     <h1>Quote Search Engine</h1>
+   </div>
+   <span class="tag-pill">Live Search</span>
+ </div>
+
+ <div class="input-card">
+   <label for="input" class="input-label">Quote / Excerpt</label>
+   <textarea id="input" maxlength="1000" placeholder="Enter any dialogue quote, literary excerpt, lyric, or speech snippet..." oninput="updateCharCounter()" onkeydown="handleInputKeydown(event)"></textarea>
+   <div id="charCounter" class="char-counter">0 / 1000</div>
+   <div class="action-row">
+     <button id="identifyBtn" class="btn-primary" onclick="analyze()">Identify Quote</button>
+     <button class="btn-secondary" onclick="clearAll()">Reset</button>
+   </div>
+   <div id="historySection" class="history-section">
+     <div class="history-header">
+       <div class="history-label">Recent Resolved Works (Last 8)</div>
+       <button id="clearHistoryBtn" class="history-clear-all" type="button">Clear all</button>
+     </div>
+     <div id="historyRow" class="history-row"></div>
+   </div>
+   <div id="exampleSection" class="example-section">
+     <div class="history-label">Try an Example</div>
+     <div id="exampleRow" class="history-row"></div>
+   </div>
+ </div>
+
+ <div id="result" role="region" aria-label="Resolution results" aria-live="polite"></div>
+
+ <div class="footer-text">
+   Live queries via Wikiquote, Wikipedia REST &amp; iTunes Search APIs - no static lookup table
+ </div>
+
+</div>
+
+<script>
+// Reads a shared/bookmarked link's "?q=" param (see updateShareUrl) and
+// re-runs that search automatically - wrapped in try/catch since some
+// sandboxed preview embeds restrict location/URL access the way they
+// previously did for localStorage.
+function initApp() {
+  renderHistoryButtons();
+  try {
+    const sharedQuery = new URLSearchParams(window.location.search).get('q');
+    if (sharedQuery && sharedQuery.trim()) {
+      const input = document.getElementById('input');
+      input.value = sharedQuery.slice(0, 1000);
+      updateCharCounter();
+      analyze();
+    }
+  } catch (e) { /* restricted location/URL access - non-fatal */ }
+}
+
+document.addEventListener('DOMContentLoaded', initApp);
+
+const HISTORY_KEY = 'media_engine_history_results_v9';
+const REQUEST_TIMEOUT_MS = 8000;
+const MEDIA_TYPE_KEYWORDS = ['film', 'movie', 'album', 'song', 'single', 'tv series', 'television series',
+  'mini-series', 'video game', 'musical', 'soundtrack', 'podcast', 'opera'];
+const PERSON_HINT_WORDS = ['poet', 'author', 'writer', 'novelist', 'playwright', 'philosopher', 'politician',
+  'president', 'king', 'queen', 'emperor', 'general', 'scientist', 'physicist', 'activist', 'actor', 'actress',
+  'singer', 'musician', 'director', 'journalist', 'theologian', 'preacher', 'economist', 'historian', 'artist',
+  'comedian', 'athlete', 'inventor', 'entrepreneur', 'monk', 'diplomat'];
+const STOPWORDS = new Set(['the', 'a', 'an', 'of', 'to', 'and', 'in', 'on', 'for', 'is', 'it', 'that', 'this',
+  'with', 'as', 'by', 'was', 'were', 'are', 'be', 'i', 'you', 'he', 'she', 'they', 'we', 'not', 'but', 'or']);
+
+const MAX_CANDIDATES = 5;
+// How many raw hits to pull from each search API before we do our own
+// scoring - deliberately larger than MAX_CANDIDATES. MediaWiki's relevance
+// ranking is generic term-frequency-style, not "which page is the canonical
+// source of this exact quote" - a famous line can be duplicated across many
+// pages (collections, "on this day" pages, tangential mentions) that
+// out-rank the actual source's own page. Fetching more before truncating
+// means our own word-overlap scoring gets a chance to correct that, instead
+// of the true source being discarded before it's even scored.
+const SEARCH_FETCH_LIMIT = 10;
+const AUTO_ACCEPT_SCORE = 0.6;
+const AUTO_ACCEPT_MARGIN = 0.12;
+const MIN_CANDIDATE_SCORE = 0.2;
+// Below this, a normalized query has too little content for phrase
+// containment to mean anything (e.g. "may force" after stopword-adjacent
+// short queries) - findMatchingSection skips line-matching entirely rather
+// than risk a coincidental short-string match.
+const MIN_CONTAINMENT_QUERY_CHARS = 20;
+const MAX_RETRIES = 1;
+const RETRY_DELAY_MS = 600;
+// Caps the whole resolveCandidate() chain (summary fetch, Wikiquote section
+// lookup, work/author detail fallback, asset fetches), not any single
+// request - that's already bounded by REQUEST_TIMEOUT_MS. Without this, a
+// handful of transient failures across several sequential stages (each
+// retried once after RETRY_DELAY_MS) could leave the button stuck on
+// "Searching..." for a minute or more with no cap at all.
+const OVERALL_TIMEOUT_MS = 20000;
+// 553KB (Abraham Lincoln's own Wikiquote page - one of the largest, most
+// heavily-cited pages on the site) parses and scores in ~30ms in testing, so
+// the original 300,000 cap was excluding exactly the major, heavily-quoted
+// figures this feature matters most for. Raised well past realistic page
+// sizes; this guard now only exists for genuinely pathological outliers.
+const MAX_WIKITEXT_CHARS = 2000000;
+
+// Every API URL is built as `${HTTPS_PREFIX}en.wikiquote.org/...` instead of
+// a literal `https://en.wikiquote.org/...` template. Google Apps Script's
+// HtmlService re-embeds this file's raw source text into its own JS
+// construct when injecting it into the sandboxed iframe, and some step in
+// that pipeline treats a literal "//" anywhere in the raw text as the start
+// of a line comment - even sitting inside a template literal as part of a
+// URL, not an actual comment - and deletes everything after it up to the
+// next newline. That silently truncated every fetchJson(`https://...`) call
+// mid-string, dropping the rest of the URL, the closing backtick, and the
+// closing paren, which is what produced "missing ) after argument list".
+// Splitting the two slashes into separate concatenated string literals means
+// the raw source never contains "//" as two contiguous characters.
+const HTTPS_PREFIX = 'https:' + '/' + '/';
+
+let activeRequestId = 0;
+const resultCache = new Map();
+
+// ---------- Safety helpers ----------
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+function safeUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'https:' || u.protocol === 'http:') return u.href;
+  } catch (e) { /* fall through */ }
+  return '#';
+}
+
+function normalizeQuery(q) {
+  return q.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isStale(requestId) {
+  return requestId !== activeRequestId;
+}
+
+function timeoutRejection(ms) {
+  return new Promise((_, reject) => {
+    setTimeout(() => {
+      const err = new Error(`Request timed out after ${ms}ms`);
+      err.name = 'TimeoutError';
+      reject(err);
+    }, ms);
+  });
+}
+
+// Note: this deliberately does NOT pass an AbortSignal into fetch() - this preview
+// sandbox relays fetch through the parent frame via postMessage, and AbortSignal
+// is not structured-cloneable, which throws a DataCloneError before the request
+// is even sent. Promise.race gives an equivalent timeout without that dependency.
+// The underlying fetch may still complete in the background after a timeout; its
+// result is simply never used (see isStale() checks in analyze()).
+//
+// A single attempt. 404 is treated as a legitimate "page doesn't exist" (null),
+// not an error - the REST summary endpoint uses it routinely for titles we're
+// only speculatively checking. Everything else that isn't ok() becomes a typed
+// error so callers (and the UI) can tell a dead network apart from being
+// rate-limited apart from the API just returning garbage.
+async function fetchJsonOnce(url, timeoutMs) {
+  let res;
+  try {
+    res = await Promise.race([fetch(url), timeoutRejection(timeoutMs)]);
+  } catch (e) {
+    if (e.name === 'TimeoutError') throw e;
+    const err = new Error('Network request failed (offline, or blocked by CORS/an extension)');
+    err.name = 'NetworkError';
+    throw err;
+  }
+
+  if (res.status === 404) return null;
+  if (res.status === 429) {
+    const err = new Error('Rate limited by upstream API');
+    err.name = 'RateLimitError';
+    throw err;
+  }
+  if (!res.ok) {
+    const err = new Error(`Upstream API responded with HTTP ${res.status}`);
+    err.name = 'ApiError';
+    err.status = res.status;
+    throw err;
+  }
+
+  let parsed;
+  try {
+    parsed = await res.json();
+  } catch (e) {
+    const err = new Error('Malformed JSON in API response');
+    err.name = 'ParseError';
+    throw err;
+  }
+
+  // MediaWiki's search/parse endpoints report their own errors (bad params,
+  // deprecated action, maintenance mode) as a normal HTTP 200 with an
+  // {"error":{"code":...}} body, not as an HTTP error status - so a caller
+  // reading data?.query?.search || [] silently sees "no results" instead of
+  // an actual, actionable error. iTunes and the Wikipedia REST summary
+  // endpoint don't use this response shape, so this check is a no-op for them.
+  if (parsed && parsed.error && parsed.error.code) {
+    // "This Wikiquote page doesn't exist for this exact title" is the
+    // ROUTINE case for action=parse (most Wikipedia-derived candidates don't
+    // have an identically-titled Wikiquote page) - MediaWiki reports it as
+    // missingtitle/invalidtitle here instead of an HTTP 404 the way the REST
+    // summary endpoint does. Treating it as null (same as a 404 above) keeps
+    // it a non-error; treating it as a thrown ApiError instead turned this
+    // extremely common, expected condition into a "secondary lookup issue"
+    // banner note on perfectly good results, and blocked those results from
+    // ever being cached (see hadNetworkError below).
+    if (parsed.error.code === 'missingtitle' || parsed.error.code === 'invalidtitle') return null;
+    // MediaWiki's own action=query/parse rate limiting and replica-lag
+    // conditions ("ratelimited", "maxlag") arrive as HTTP 200 with this error
+    // shape, distinct from an actual HTTP 429 - isTransientError() only
+    // retries an ApiError when status>=500, so without this these would fall
+    // through as a permanent-looking ApiError and never get fetchJson's
+    // built-in one-shot retry the way a real 429 does.
+    if (parsed.error.code === 'ratelimited' || parsed.error.code === 'maxlag') {
+      const err = new Error(parsed.error.info || 'Rate limited by upstream API');
+      err.name = 'RateLimitError';
+      throw err;
+    }
+    const err = new Error(parsed.error.info || `Upstream API error: ${parsed.error.code}`);
+    err.name = 'ApiError';
+    err.status = res.status;
+    throw err;
+  }
+
+  return parsed;
+}
+
+// Snapshots an existing tracker's accumulated kinds into a fresh one. Used so
+// each settle()/retry attempt starts from the errors already known at that
+// point (e.g. a failed candidate search) without PERMANENTLY inheriting
+// them - without this, one transient failure on the first attempt would keep
+// marking every later successful retry as "had a network error" too, forever
+// blocking that result from being cached.
+function cloneErrorTracker(src) {
+  const t = createErrorTracker();
+  src.kinds.forEach(k => t.kinds.add(k));
+  src.criticalKinds.forEach(k => t.criticalKinds.add(k));
+  return t;
+}
+
+// Seeds only the informational `kinds` from an existing tracker, NOT its
+// criticalKinds - used when a specific candidate is being resolved. A
+// candidate-search-phase hiccup (e.g. Wikiquote search got rate-limited but
+// Wikipedia search still produced a good candidate) is still worth mentioning
+// in the UI note, but cloneErrorTracker's full copy meant that single earlier
+// critical error got baked into every settle()/retry attempt for the rest of
+// the run - permanently blocking caching even after a completely clean
+// resolveCandidate. Only genuine errors from resolving THIS candidate should
+// count as critical for this attempt.
+function seedErrorTracker(src) {
+  const t = createErrorTracker();
+  src.kinds.forEach(k => t.kinds.add(k));
+  return t;
+}
+
+function isTransientError(e) {
+  if (e?.name === 'RateLimitError' || e?.name === 'NetworkError') return true;
+  if (e?.name === 'ApiError' && e.status >= 500) return true;
+  return false;
+}
+
+// One bounded retry for failures that are plausibly transient (rate limit,
+// network blip, 5xx) - not for timeouts (retrying just doubles the wait for
+// something that was already slow) and not for 4xx/parse errors (retrying an
+// identical malformed request just gets the identical malformed response).
+async function fetchJson(url, timeoutMs = REQUEST_TIMEOUT_MS) {
+  try {
+    return await fetchJsonOnce(url, timeoutMs);
+  } catch (e) {
+    if (!isTransientError(e)) throw e;
+    await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    return fetchJsonOnce(url, timeoutMs);
+  }
+}
+
+// Classifies a caught error into one of a small set of user-facing "kinds" and
+// accumulates them across a whole analyze() run, so the final banner can say
+// something like "rate-limited by an upstream API" instead of a generic
+// "network error" that conflates a dead connection with a 429 with a
+// truncated JSON response.
+function classifyError(e) {
+  switch (e?.name) {
+    case 'TimeoutError': return 'timeout';
+    case 'RateLimitError': return 'rate-limit';
+    case 'NetworkError': return 'network';
+    case 'ApiError': return 'api';
+    case 'ParseError': return 'parse';
+    default: return 'unknown';
+  }
+}
+
+const ERROR_KIND_LABELS = {
+  timeout: 'a request timed out',
+  'rate-limit': 'rate-limited by an upstream API',
+  network: 'a network/CORS failure',
+  api: 'an upstream API error',
+  parse: 'a malformed API response',
+  unknown: 'an unexpected error'
+};
+
+// kinds accumulates every error for the human-readable summary; criticalKinds
+// excludes ones explicitly marked cosmetic (see fetchLiveMediaAssets) - a
+// flaky iTunes cover-art lookup is worth mentioning in the UI, but it
+// shouldn't mark an otherwise-good, correctly-resolved match as a network
+// failure and block it from being cached (which previously meant resubmitting
+// the same quote re-ran the whole chain, including hitting the flaky
+// endpoint again, forever).
+function createErrorTracker() {
+  return {
+    kinds: new Set(),
+    criticalKinds: new Set(),
+    record(e, stage, opts) {
+      const kind = classifyError(e);
+      this.kinds.add(kind);
+      if (!(opts && opts.cosmetic)) this.criticalKinds.add(kind);
+      console.warn(`${stage} failed:`, e);
+    },
+    get hadNetworkError() {
+      return this.criticalKinds.size > 0;
+    },
+    get hadAnyError() {
+      return this.kinds.size > 0;
+    },
+    describe() {
+      return [...this.kinds].map(k => ERROR_KIND_LABELS[k] || k).join(', ');
+    }
+  };
+}
+
+// ---------- Interpretation helpers (replace the old hardcoded alias table) ----------
+
+// Crude confidence scoring: what fraction of the submitted quote's significant
+// words actually show up in a candidate title/snippet/page line. Not a real
+// text-similarity algorithm, but it's enough to separate "this is clearly the
+// same quote" from "this is an unrelated page that happened to rank #1".
+function tokenize(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !STOPWORDS.has(w));
+}
+
+// Longest run of consecutive words shared between the two arrays, in the
+// same relative order - a plain word-for-word longest-common-substring over
+// tokens, not subsequence. qWords/cWords are both typically short (a quote
+// plus a search snippet), so the O(n*m) double loop is fine.
+function longestCommonRun(wordsA, wordsB) {
+  let best = 0;
+  for (let i = 0; i < wordsA.length; i++) {
+    for (let j = 0; j < wordsB.length; j++) {
+      let k = 0;
+      while (i + k < wordsA.length && j + k < wordsB.length && wordsA[i + k] === wordsB[j + k]) k++;
+      if (k > best) best = k;
+    }
+  }
+  return best;
+}
+
+// A query dominated by stopwords can collapse to just one or two surviving
+// content words - e.g. "To be, or not to be, that is the question" survives
+// tokenize/STOPWORDS as just ["question"]. At that point a "contiguous run"
+// of length 1 against some candidate is really just "this one common word
+// appears somewhere", not a real phrase match - live-reproduced: that exact
+// query scored "Question (1963 film)", "Question (comics)", "Answer", and
+// "Divination" all at a coincidental 100%, while Hamlet never even appeared
+// in the candidate list. Scaling the achievable score down by how few
+// DISTINCT content words survived means a one-or-two-word coincidence can
+// never present as a confident match; CONTENT_WORD_CONFIDENCE_FLOOR-or-more
+// distinct content words are needed to reach full scoring headroom.
+const CONTENT_WORD_CONFIDENCE_FLOOR = 4;
+// A raw score at or above this is treated as "essentially perfect" for the
+// purpose of deciding whether the content-word floor still applies (see
+// combinedScore) - a full-length, correctly-ordered, no-mismatch phrase
+// match, not merely "pretty close".
+const NEAR_PERFECT_RAW_SCORE = 0.9;
+
+// Combines plain word-overlap (recall: what fraction of the query's words
+// appear anywhere in the candidate) with a phrase-contiguity bonus
+// (precision: how much of that appears as one unbroken, correctly-ordered
+// run). Pure recall alone can't separate a genuine quote from an unrelated
+// page: submitting the Gettysburg Address opening line scored a topic page,
+// an "on this day" trivia page, and a sitcom that merely quotes the line in
+// dialogue all at a tied 100% overlap, because every one of the line's words
+// showed up *somewhere* in their snippet. The contiguity term rewards a
+// snippet that actually contains the phrase as written over one that
+// scatters the same words across unrelated text.
+function combinedScore(queryText, candidateText) {
+  const qWords = tokenize(queryText);
+  if (qWords.length === 0) return 0;
+  const cWords = tokenize(candidateText);
+  const cWordSet = new Set(cWords);
+  let hits = 0;
+  for (const w of qWords) if (cWordSet.has(w)) hits++;
+  const overlap = hits / qWords.length;
+  const contiguity = longestCommonRun(qWords, cWords) / qWords.length;
+  const raw = overlap * 0.5 + contiguity * 0.5;
+
+  // A single surviving content word (e.g. "question" from "To be, or not to
+  // be, that is the question") can coincidentally match almost any unrelated
+  // page regardless of how "perfect" the raw score looks - always dampen
+  // this case hard, full stop.
+  //
+  // But applying that SAME dampening unconditionally to a 2-or-more-word
+  // near-perfect match over-corrected the fix: "To infinity and beyond" also
+  // only survives tokenize/STOPWORDS down to 2 words ("infinity", "beyond"),
+  // yet a full-length, contiguous, correctly-ordered match on two specific,
+  // uncommon words together is already a strong and unlikely-to-be-
+  // coincidental signal - it was getting flattened to a misleading 50%
+  // alongside genuinely ambiguous matches, both blocking legitimate
+  // auto-accept and under-reporting confidence on an unambiguous catchphrase
+  // once a candidate was chosen. Two-or-more distinct words that match this
+  // well are trusted at full strength; everything else still scales down by
+  // how few distinct content words survived.
+  const distinctContentWords = new Set(qWords).size;
+  if (distinctContentWords >= 2 && raw >= NEAR_PERFECT_RAW_SCORE) return raw;
+  const confidenceCeiling = Math.min(1, distinctContentWords / CONTENT_WORD_CONFIDENCE_FLOOR);
+  return raw * confidenceCeiling;
+}
+
+// MediaWiki search snippets are HTML fragments with entity-encoded quotes
+// (&quot;, &#039;, etc). A regex tag-strip alone leaves those entities literal
+// ("I&#039;ll") - parsing into a detached, never-appended element and reading
+// textContent strips tags AND decodes entities via the browser's own HTML
+// parser, without ever executing anything (an inert element's innerHTML does
+// not run <script> tags, and this node is never inserted into the document).
+function stripHtmlTags(html) {
+  const el = document.createElement('div');
+  el.innerHTML = String(html || '');
+  return el.textContent || '';
+}
+
+// Wikipedia's REST summary endpoint usually returns a short "description" field
+// like "1845 narrative poem by Edgar Allan Poe" or "1963 speech by Abraham Lincoln" - 
+// but a BIOGRAPHY page (e.g. "Abraham Lincoln") returns "16th president of the
+// United States", with no "by" clause and no specific work at all. Treating that
+// string as a work type is the #1 source of nonsense results, so this also flags
+// person-shaped descriptions (occupation words, birth-death ranges) so the caller
+// can go look for the *actual* work separately instead of taking it at face value.
+function classifyDescription(description) {
+  if (!description) return { type: '', author: '', isPerson: false, isDirectWorkMatch: false };
+  const desc = description.trim();
+
+  // Greedy .* (not lazy .*?) so backtracking lands on the LAST "by" in the
+  // description, i.e. the trailing authorship clause - a lazy match instead
+  // grabbed the first "by" it found anywhere, so a description like "a small
+  // town by the sea, by Stephen King" parsed the author as "the sea, by
+  // Stephen King" instead of "Stephen King".
+  const byMatch = desc.match(/^(.*)\bby\s+(.+)$/i);
+  if (byMatch) {
+    let type = byMatch[1].trim().replace(/,\s*$/, '')
+      .replace(/^\d{4}\s+/, '')
+      .replace(/^\d{1,2}(st|nd|rd|th)-century\s+/i, '');
+    if (type) type = type.charAt(0).toUpperCase() + type.slice(1);
+    const author = byMatch[2].trim().replace(/[.]$/, '');
+    return { type, author, isPerson: false, isDirectWorkMatch: true };
+  }
+
+  // Built via String.fromCharCode rather than a literal en/em dash character
+  // in the source: Google Apps Script's HtmlService re-serializes this file
+  // and was observed corrupting literal non-ASCII source characters into
+  // invalid octal escape sequences, breaking the entire script. Every
+  // character in this file's actual source is now plain ASCII as a result.
+  const isBirthDeathRange = new RegExp('\\b\\d{3,4}\\s*[-' + String.fromCharCode(8211,8212) + ']\\s*(\\d{3,4}|present)\\b', 'i').test(desc);
+  const hasPersonKeyword = PERSON_HINT_WORDS.some(w => new RegExp(`\\b${w}s?\\b`, 'i').test(desc));
+  if (isBirthDeathRange || hasPersonKeyword) {
+    return { type: desc.charAt(0).toUpperCase() + desc.slice(1), author: '', isPerson: true, isDirectWorkMatch: false };
+  }
+
+  let type = desc
+    .replace(/^\d{4}\s+/, '')
+    .replace(/^\d{1,2}(st|nd|rd|th)-century\s+/i, '')
+    .trim();
+  if (type) type = type.charAt(0).toUpperCase() + type.slice(1);
+  // No "by" clause and no person-ish keywords: ambiguous - could be a genuine
+  // no-author work (e.g. a folk saying) or a description shape we didn't
+  // anticipate (e.g. "a group of revolutionary leaders"). Not confident
+  // enough to call this a direct work match either way.
+  return { type, author: '', isPerson: false, isDirectWorkMatch: false };
+}
+
+function isMediaType(typeStr) {
+  const t = (typeStr || '').toLowerCase();
+  return MEDIA_TYPE_KEYWORDS.some(k => t.includes(k));
+}
+
+// ---------- Wikiquote section lookup ----------
+// Wikiquote organizes a person's page into sections per work (e.g. a heading
+// like "The Adventures of Tom Sawyer (1876)"), with the actual quotes as bullet
+// lines underneath. Fetching the raw wikitext and finding which section's lines
+// best overlap the submitted quote lets us recover the real work title instead
+// of just reporting the person's own bio page as "the source".
+// Tracks heading nesting (via a level stack), not just a flat split, because a
+// Wikiquote "theme" or "collection" page (e.g. "Founding Fathers of the United
+// States") nests as Person heading -> Work sub-heading -> quote lines. A flat
+// split would report whichever heading is nearest the matched line and lose
+// the other level - headingPath keeps the full chain so the caller can tell
+// "outer" (likely author) from "inner" (likely the specific work) apart.
+async function fetchWikiquoteSections(title) {
+  const data = await fetchJson(`${HTTPS_PREFIX}en.wikiquote.org/w/api.php?action=parse&page=${encodeURIComponent(title)}&prop=wikitext&format=json&origin=*`);
+  const wikitext = data?.parse?.wikitext?.['*'];
+  if (!wikitext) return [];
+  // A handful of Wikiquote "collection" pages run to hundreds of KB of
+  // wikitext; parsing and then scoring every line of one on the main thread
+  // would visibly stall the UI for a heading match that's already unlikely to
+  // be a clean single work. Treat oversized pages the same as "no sections
+  // found" rather than let the input freeze.
+  if (wikitext.length > MAX_WIKITEXT_CHARS) return [];
+
+  const lines = wikitext.split('\n');
+  const sections = [];
+  const stack = [];
+  let current = { headingPath: [], heading: title, body: [] };
+  // Captures the closing "=" run into its own group (m[3]) and checks
+  // equality against the opening (m[1]) in code below, rather than using a
+  // backslash-one backreference in the regex. A backreference like that
+  // parses fine on its own, but Google Apps Script's HtmlService re-embeds
+  // this file's raw source text inside its own JS template literal when
+  // constructing the document.write() call that injects it into the
+  // sandboxed iframe - at that point it's just a backslash followed by a
+  // digit sitting in someone else's template string, which reads as an
+  // illegal octal escape there, and broke the entire injected script.
+  // (Not spelled out literally here on purpose, to avoid the same fate.)
+  const headingRe = /^(={2,4})\s*(.+?)\s*(={2,4})\s*$/;
+
+  for (const line of lines) {
+    const m = line.match(headingRe);
+    if (m && m[1].length === m[3].length) {
+      const level = m[1].length;
+      const text = m[2].trim();
+      if (current.body.length) sections.push(current);
+      while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+      stack.push({ level, text });
+      current = { headingPath: stack.map(s => s.text), heading: text, body: [] };
+    } else {
+      current.body.push(line);
+    }
+  }
+  if (current.body.length) sections.push(current);
+  return sections;
+}
+
+// Best-effort wikitext -> plain text, just enough to compare against the
+// submitted quote (templates, refs, and link brackets stripped).
+// Built via new RegExp() with doubled backslashes rather than as literal
+// regex syntax with escaped structural characters: Google Apps Script's
+// HtmlService re-embeds this file's raw source text into its own JS
+// construct when injecting it into the sandboxed iframe, and a single
+// escaped bracket, brace, or slash character in our source broke that step
+// the same way the heading-matching and heading-cleanup regexes did above.
+// A doubled backslash is unambiguous in every context, sidestepping the
+// whole class of failure regardless of the exact re-embedding mechanism.
+const REF_TAG_RE = new RegExp('<ref[^>]*>[\\s\\S]*?<\\/ref>', 'gi');
+const REF_SELFCLOSE_RE = new RegExp('<ref[^>]*\\/>', 'gi');
+const TEMPLATE_RE = new RegExp('\\{\\{[^{}]*\\}\\}', 'g');
+const WIKILINK_RE = new RegExp('\\[\\[([^\\[\\]]+)\\]\\]', 'g');
+
+function stripWikiMarkup(text) {
+  let result = String(text || '')
+    .replace(REF_TAG_RE, '')
+    .replace(REF_SELFCLOSE_RE, '')
+    .replace(TEMPLATE_RE, '')
+    .replace(TEMPLATE_RE, '');
+
+  // Wikilinks nest - an image embed's caption commonly contains further
+  // [[links]] of its own, e.g.:
+  //   [[File:MLK.jpg|thumb|...rooted in [[w:American Dream|the American dream]]...]]
+  // A single regex pass can't match balanced/nested brackets: it either
+  // stops at the FIRST "]]" it finds (leaving a dangling trailing "]]" from
+  // the real outer close), or a naive capture leaves an inner parameter like
+  // "thumb|" stuck to the front of the caption. Repeatedly resolving only
+  // the INNERMOST [[...]] (the one with no brackets inside it) to its last
+  // pipe-segment - [[Page]] -> "Page", [[Page|Display]] -> "Display", and
+  // the same rule for a File/Image link's trailing caption segment - peels
+  // nesting off from the inside out regardless of depth, with no leftovers.
+  let prev;
+  do {
+    prev = result;
+    result = result.replace(WIKILINK_RE, (m, inner) => inner.split('|').pop());
+  } while (result !== prev);
+
+  return result
+    .replace(/'''''|'''|''/g, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/^[*:#]+\s*/, '')
+    .trim();
+}
+
+// Wikiquote headings that are structural boilerplate, not a work or a person
+// (e.g. "Sourced", "See also"), plus bare single-character headings - common
+// on "collection" pages that index entries alphabetically ("== L ==") rather
+// than by work. Trusting these as a "work title" is how a Lincoln quote ends
+// up attributed to the Wikipedia article about the letter L.
+const HEADING_BLOCKLIST = new Set(['see also', 'external links', 'sourced', 'unsourced', 'attributed',
+  'disputed', 'misattributed', 'quotes', 'notes', 'references', 'other', 'overview', 'biography',
+  'early life', 'criticism', 'reception', 'legacy', 'further reading', 'links', 'sources', 'about']);
+
+function isUsableHeading(text) {
+  const t = (text || '').trim();
+  if (t.length < 3) return false;
+  if (HEADING_BLOCKLIST.has(t.toLowerCase())) return false;
+  if (/^quotes?\s+(about|on|by)\b/i.test(t)) return false;
+  // Alphabetical index headings used to sub-group entries - "L", "A-L",
+  // "M-Z" - rather than to name a work. The single-char case is already
+  // caught by the length check above; this also catches ranges, which
+  // otherwise pass length>=3 and aren't in the blocklist (this is how a
+  // Churchill quote nearly got attributed to a "work" literally titled "M-Z").
+  if (new RegExp('^[a-z]\\s*(?:[-' + String.fromCharCode(8211,8212) + ']|to)\\s*[a-z]$', 'i').test(t)) return false;
+  return true;
+}
+
+// Finds the single best-matching line across ALL sections, regardless of
+// whether its heading is "usable" for attribution (see isUsableHeading) - a
+// line under a filtered-out heading like "Disputed" or an alphabetical index
+// ("== L ==") is still genuine, verbatim source text worth showing to the
+// user, even on the (more common) path where we don't trust that heading
+// enough to claim it names a specific work or author. headingUsable is
+// returned separately so callers can make that attribution call themselves.
+// Strips punctuation on top of normalizeQuery's lowercase/whitespace
+// collapsing, so a comma or dash difference between the submission and the
+// source's exact wikitext formatting doesn't block a match.
+function normalizeForContainment(text) {
+  return normalizeQuery(text).replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function wordsOf(text) {
+  return normalizeForContainment(text).split(' ').filter(Boolean);
+}
+
+// Does lineWords contain, somewhere, a close approximate match for the full
+// queryWords sequence - allowing not just substitutions but also inserted or
+// dropped words - within a small edit-distance budget? This is what lets a
+// common misquote (a one-word substitution like "will" for Churchill's actual
+// "shall", or a half-remembered line with an extra/missing word) still
+// resolve to the real quote, without reopening the false-positive class that
+// plain bag-of-words scoring caused (see the "May the Force be with you"
+// incident): matching still requires the words to appear adjacent and in
+// order, not merely present anywhere in the document - that requirement is
+// what makes this safe, and it's preserved here.
+//
+// A prior version only tolerated substitutions (fixed-width, position-by-
+// position comparison), which broke on a single inserted or dropped word: an
+// extremely common feature of half-remembered quotes, since it shifts every
+// later word's index by one and can exceed the mismatch budget even when the
+// source line is genuinely, closely present. This is the standard
+// "approximate substring search" DP instead: dp[i][j] is the minimum edit
+// distance to align the first i query words with SOME suffix of lineWords
+// ending at position j - the first row is seeded to all zeros so the match
+// is free to start at any position in lineWords, and each step allows a
+// deletion (skip a query word), insertion (skip a line word), or
+// substitution/match, exactly like word-level Levenshtein distance.
+function findApproximateWindow(queryWords, lineWords) {
+  const qLen = queryWords.length;
+  const lLen = lineWords.length;
+  if (qLen === 0 || lLen === 0) return false;
+  const maxEdits = Math.min(3, Math.floor(qLen * 0.2));
+
+  let prevRow = new Array(lLen + 1).fill(0);
+  for (let i = 1; i <= qLen; i++) {
+    const row = new Array(lLen + 1);
+    row[0] = i;
+    for (let j = 1; j <= lLen; j++) {
+      const cost = queryWords[i - 1] === lineWords[j - 1] ? 0 : 1;
+      row[j] = Math.min(
+        prevRow[j] + 1,     // deletion: drop this query word
+        row[j - 1] + 1,     // insertion: skip this line word
+        prevRow[j - 1] + cost // substitution or exact match
+      );
+    }
+    prevRow = row;
+  }
+
+  return prevRow.some(cost => cost <= maxEdits);
+}
+
+function findMatchingSection(sections, rawInput) {
+  const normQuery = normalizeForContainment(rawInput);
+  if (normQuery.length < MIN_CONTAINMENT_QUERY_CHARS) return null;
+  const queryWords = wordsOf(rawInput);
+
+  let best = null;
+  for (const section of sections) {
+    // Headings come straight from wikitext (e.g. "[[w:Wild Rebels|Wild Rebels]]")
+    // and need the same markup stripping as body lines before they're fit to display.
+    const cleanHeading = stripWikiMarkup(section.heading);
+    const headingPath = section.headingPath.map(stripWikiMarkup);
+
+    // "Quotes about/on X" sections hold OTHER people's commentary that
+    // happens to mention the subject - not the subject's own words. This is
+    // how a literary critic's reminiscence about a *rumored, explicitly-
+    // disputed* alternate wording of Churchill's beaches speech ("it was
+    // rumoured that what he actually said was...") nearly got shown to the
+    // user as verified fact. These sections are skipped entirely - checking
+    // the full headingPath (not just the section's own heading) catches a
+    // "Quotes about Churchill" ancestor even when the literal match is a
+    // level down, e.g. inside its "M-Z" sub-grouping.
+    if (headingPath.some(h => /^quotes?\s+(about|on|by)\b/i.test(h))) continue;
+
+    for (const rawLine of section.body) {
+      const line = stripWikiMarkup(rawLine);
+      if (!line) continue;
+      if (!findApproximateWindow(queryWords, wordsOf(line))) continue;
+      // Multiple lines can pass (e.g. a "collection" page quoting it once
+      // directly and once in surrounding commentary) - the shortest
+      // qualifying line is the tightest, most specific match.
+      if (!best || line.length < best.line.length) {
+        best = {
+          heading: cleanHeading,
+          headingPath,
+          headingUsable: isUsableHeading(cleanHeading),
+          line,
+          score: 1
+        };
+      }
+    }
+  }
+  return best;
+}
+
+// ---------- History (localStorage) ----------
+
+function updateCharCounter() {
+  const input = document.getElementById('input');
+  const counter = document.getElementById('charCounter');
+  const len = input.value.length;
+  const max = input.maxLength;
+  counter.textContent = `${len} / ${max}`;
+  counter.classList.toggle('near-limit', len >= max * 0.9 && len < max);
+  counter.classList.toggle('at-limit', len >= max);
+}
+
+function clearAll() {
+  // Bumping activeRequestId marks any in-flight search stale (see isStale()),
+  // so its eventual response is discarded instead of quietly repopulating the
+  // result panel with the previous query's answer after the user has already
+  // cleared the input and moved on.
+  activeRequestId++;
+  const btn = document.getElementById('identifyBtn');
+  btn.disabled = false;
+  btn.textContent = 'Identify Quote';
+  document.getElementById('input').value = '';
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('input').focus();
+  updateCharCounter();
+}
+
+// Ctrl/Cmd+Enter submits from inside the textarea (plain Enter still just
+// inserts a newline, since quotes are often multi-line) - Escape resets,
+// matching the Reset button. Both are common conventions for a text-entry
+// box whose primary action lives in a separate button.
+function handleInputKeydown(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    analyze();
+  } else if (e.key === 'Escape') {
+    clearAll();
+  }
+}
+
+// Reflects the current query in the address bar as "?q=..." so the result is
+// bookmarkable/shareable without any backend - just a client-side history
+// entry. replaceState (not pushState) so repeated searches don't pollute
+// back/forward history with one entry per query. Wrapped in try/catch for
+// the same sandboxed-embed reasons as initApp().
+function updateShareUrl(query) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('q', query);
+    window.history.replaceState(null, '', url.toString());
+  } catch (e) { /* restricted location/history access - non-fatal */ }
+}
+
+// A handful of well-known lines spanning different media (a speech, a
+// wartime address, a civil-rights address, a film line) so a first-time
+// visitor with empty history has something to click instead of a blank box.
+// Only shown when history is empty (see renderExampleChips) - once the user
+// has searched anything, their own history is more useful than these.
+const EXAMPLE_QUOTES = [
+  'Four score and seven years ago our fathers brought forth on this continent a new nation',
+  'We shall fight on the beaches, we shall fight on the landing grounds',
+  'I have a dream that one day this nation will rise up and live out the true meaning of its creed',
+  'May the Force be with you'
+];
+
+function renderExampleChips(historyLength) {
+  const section = document.getElementById('exampleSection');
+  const row = document.getElementById('exampleRow');
+  if (historyLength > 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  row.innerHTML = '';
+  EXAMPLE_QUOTES.forEach(q => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-example';
+    btn.textContent = q.length > 46 ? q.slice(0, 43) + '...' : q;
+    btn.title = q;
+    btn.onclick = () => {
+      document.getElementById('input').value = q;
+      updateCharCounter();
+      analyze();
+    };
+    row.appendChild(btn);
+  });
+}
+
+// Formats a stored history timestamp as a short relative label. Entries
+// saved before this field existed simply have no `time` - returns '' rather
+// than a misleading "just now" for those.
+function formatRelativeTime(ts) {
+  if (!ts) return '';
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if (sec < 5) return 'just now';
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
+}
+
+// Markup for the small color-coded confidence bar shown under a percentage -
+// tiers mirror the thresholds analyze() already uses (AUTO_ACCEPT_SCORE for
+// "high", MIN_CANDIDATE_SCORE for "low") so the color always agrees with how
+// the app actually behaved, rather than an independently-tuned scale.
+function confidenceMeterHtml(score) {
+  const pct = Math.max(0, Math.min(100, Math.round((score || 0) * 100)));
+  const tier = score >= AUTO_ACCEPT_SCORE ? 'tier-high' : score >= MIN_CANDIDATE_SCORE ? 'tier-mid' : 'tier-low';
+  return `<div class="confidence-meter"><div class="confidence-meter-fill ${tier}" style="width:${pct}%;"></div></div>`;
+}
+
+// Builds a plain-text citation string for the clipboard - informal rather
+// than a strict MLA/APA form, since the app doesn't reliably have publication
+// years or full bibliographic fields for most resolved works.
+function buildCitationText(data, currentRawInput) {
+  const quoteText = data.verifiedQuoteText || currentRawInput;
+  const hasAuthor = data.creatorOrAuthor && data.creatorOrAuthor !== 'Not identified from source data';
+  const hasWork = data.workTitle && data.workTitle !== currentRawInput;
+  let citation = `"${quoteText}"`;
+  if (hasAuthor && hasWork) citation += ` - ${data.creatorOrAuthor}, ${data.workTitle}`;
+  else if (hasAuthor) citation += ` - ${data.creatorOrAuthor}`;
+  else if (hasWork) citation += ` - ${data.workTitle}`;
+  return citation;
+}
+
+// Copies text to the clipboard with a graceful fallback for contexts where
+// the async Clipboard API is unavailable (e.g. some sandboxed/non-secure
+// embeds), and gives the button brief inline feedback either way.
+async function copyToClipboard(text, buttonEl) {
+  const original = buttonEl.textContent;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    buttonEl.textContent = 'Copied!';
+  } catch (e) {
+    buttonEl.textContent = 'Copy failed';
+  }
+  setTimeout(() => { buttonEl.textContent = original; }, 1800);
+}
+
+// Re-triggers the #result.reveal CSS animation - toggling the same class
+// without removing it first wouldn't restart an already-finished animation,
+// so this forces a reflow (reading offsetWidth) between remove and re-add.
+function revealResult(res) {
+  res.classList.remove('reveal');
+  void res.offsetWidth;
+  res.classList.add('reveal');
+}
+
+function getSearchHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    // A stored value can be valid JSON but not the array-of-objects shape we
+    // expect (corrupted by an extension, a hand-edit, or a future schema
+    // change) - renderHistoryButtons() runs on DOMContentLoaded, so an
+    // unguarded history.forEach/.filter on malformed data would throw and
+    // break the entire page on load, not just the history feature.
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(item => item && typeof item === 'object'
+      && typeof item.query === 'string' && typeof item.title === 'string'
+      && typeof item.creator === 'string' && typeof item.type === 'string');
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveSearchHistory(history) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch (e) { /* storage unavailable/full - non-fatal */ }
+}
+
+// Dedup key is normalizeQuery(item.query), matching resultCache's key - a
+// trivial capitalization/whitespace difference used to bypass this dedup
+// (producing a near-duplicate history chip) while still hitting the same
+// cache entry, since the two used different normalization.
+function addSearchToHistory(query, title, creator, type) {
+  let history = getSearchHistory();
+  const key = normalizeQuery(query);
+  history = history.filter(item => normalizeQuery(item.query) !== key);
+  history.unshift({ query, title, creator, type, time: Date.now() });
+  if (history.length > 8) history = history.slice(0, 8);
+  saveSearchHistory(history);
+  renderHistoryButtons();
+}
+
+function removeHistoryItem(query) {
+  const key = normalizeQuery(query);
+  const history = getSearchHistory().filter(item => normalizeQuery(item.query) !== key);
+  saveSearchHistory(history);
+  renderHistoryButtons();
+}
+
+function clearHistory() {
+  saveSearchHistory([]);
+  renderHistoryButtons();
+}
+
+function renderHistoryButtons() {
+  const history = getSearchHistory();
+  const section = document.getElementById('historySection');
+  const row = document.getElementById('historyRow');
+
+  renderExampleChips(history.length);
+
+  if (history.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  row.innerHTML = '';
+  document.getElementById('clearHistoryBtn').onclick = clearHistory;
+
+  history.forEach(item => {
+    const chip = document.createElement('div');
+    chip.className = 'history-chip';
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-history';
+    btn.type = 'button';
+    const relTime = formatRelativeTime(item.time);
+    btn.innerHTML = `<span class="history-type">[${escapeHtml(item.type)}]</span> <span class="history-detail">${escapeHtml(item.title)} - ${escapeHtml(item.creator)}</span>${relTime ? `<span class="history-time">${escapeHtml(relTime)}</span>` : ''}`;
+    // Assigning to the .title PROPERTY (not innerHTML) is not HTML-parsed, so this is safe unescaped.
+    btn.title = `Query: "${item.query}"\nType: ${item.type}\nWork: ${item.title}\nCreator: ${item.creator}`;
+    btn.onclick = () => {
+      document.getElementById('input').value = item.query;
+      updateCharCounter();
+      analyze();
+    };
+
+    const del = document.createElement('button');
+    del.className = 'history-delete';
+    del.type = 'button';
+    del.textContent = 'x';
+    del.setAttribute('aria-label', `Remove "${item.title}" from history`);
+    del.title = 'Remove from history';
+    del.onclick = () => removeHistoryItem(item.query);
+
+    chip.appendChild(btn);
+    chip.appendChild(del);
+    row.appendChild(chip);
+  });
+}
+
+// ---------- Candidate search ----------
+
+async function searchWikiquote(rawInput) {
+  const data = await fetchJson(`${HTTPS_PREFIX}en.wikiquote.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(rawInput)}&srlimit=${SEARCH_FETCH_LIMIT}&format=json&origin=*`);
+  return (data?.query?.search || []).map(hit => ({
+    title: hit.title,
+    source: 'wikiquote',
+    sourceLabel: 'Wikiquote',
+    snippet: stripHtmlTags(hit.snippet)
+  }));
+}
+
+async function searchWikipedia(rawInput) {
+  const data = await fetchJson(`${HTTPS_PREFIX}en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(rawInput)}&srlimit=${SEARCH_FETCH_LIMIT}&format=json&origin=*`);
+  return (data?.query?.search || []).map(hit => ({
+    title: hit.title,
+    source: 'wikipedia',
+    sourceLabel: 'Wikipedia',
+    snippet: stripHtmlTags(hit.snippet)
+  }));
+}
+
+// "On this day"/calendar trivia pages (e.g. "April 15") are categorically
+// never the canonical source of a quote - they just happen to mention it in
+// passing among unrelated events. Halved rather than zeroed so a page that
+// legitimately deserves to win on every other signal still can.
+const DATE_TITLE_RE = new RegExp('^(?:january|february|march|april|may|june|july|august|september'
+  + '|october|november|december)\\s+\\d{1,2}(?:st|nd|rd|th)?$', 'i');
+
+// Runs both searches in parallel (one failing doesn't block the other, matching
+// the original fallback behavior), scores every hit against the submitted text
+// via combinedScore (word overlap + phrase-contiguity) on both title and
+// snippet, dedupes by title, and returns the top candidates ranked by score -
+// instead of blindly trusting whichever API happened to return a result first.
+async function gatherCandidates(rawInput, requestId, errFlag) {
+  const wqPromise = searchWikiquote(rawInput).catch(e => {
+    errFlag.record(e, 'Wikiquote search');
+    return [];
+  });
+  const wpPromise = searchWikipedia(rawInput).catch(e => {
+    errFlag.record(e, 'Wikipedia search');
+    return [];
+  });
+
+  const [wqResults, wpResults] = await Promise.all([wqPromise, wpPromise]);
+  if (isStale(requestId)) return [];
+
+  const merged = [...wqResults, ...wpResults].map(c => {
+    let score = Math.max(combinedScore(rawInput, c.title), combinedScore(rawInput, c.snippet));
+    if (DATE_TITLE_RE.test(c.title.trim())) score *= 0.5;
+    return { ...c, score };
+  });
+
+  // Keyed by source+title, not title alone - a same-titled Wikiquote and
+  // Wikipedia hit are materially different documents (one holds actual quote
+  // text/sections, the other a bio/summary), not true duplicates. Deduping by
+  // title alone silently discarded whichever one scored marginally lower,
+  // removing it from the picker entirely even though the user might have
+  // wanted to pick the Wikiquote version specifically.
+  const byKey = new Map();
+  for (const c of merged) {
+    const key = `${c.source}:${c.title.toLowerCase()}`;
+    const existing = byKey.get(key);
+    if (!existing || c.score > existing.score) byKey.set(key, c);
+  }
+
+  return [...byKey.values()].sort((a, b) => b.score - a.score).slice(0, MAX_CANDIDATES);
+}
+
+// Given one chosen candidate, resolves it into full result data: fetches the
+// Wikipedia summary, classifies it as a person page or a work page, and - for
+// a person-shaped Wikiquote hit - goes looking for the specific work behind the
+// quote via fetchWikiquoteSections/findMatchingSection instead of reporting the
+// person's bio page as if it were the source work.
+async function resolveCandidate(candidate, rawInput, requestId, errFlag) {
+  let workTitle = candidate.title;
+  let creatorOrAuthor = 'Not identified from source data';
+  let workType = 'Unclassified';
+  let searchSource = `${candidate.sourceLabel} Search`;
+  let pageExtract = '';
+  let pageUrl = candidate.source === 'wikiquote'
+    ? `${HTTPS_PREFIX}en.wikiquote.org/wiki/${encodeURIComponent(candidate.title.replace(/ /g, '_'))}`
+    : `${HTTPS_PREFIX}en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replace(/ /g, '_'))}`;
+  let isDisambiguation = false;
+  let attributionOnly = false;
+
+  let detailData = null;
+  try {
+    detailData = await fetchJson(`${HTTPS_PREFIX}en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(candidate.title)}`);
+  } catch (e) {
+    if (isStale(requestId)) return null;
+    errFlag.record(e, 'Detail summary fetch');
+  }
+  if (isStale(requestId)) return null;
+
+  if (detailData?.type === 'disambiguation') {
+    isDisambiguation = true;
+  }
+
+  let description = '';
+  if (detailData && !isDisambiguation) {
+    if (detailData.title) workTitle = detailData.title;
+    if (detailData.extract) pageExtract = detailData.extract;
+    if (detailData.description) description = detailData.description;
+    if (detailData?.content_urls?.desktop?.page) pageUrl = safeUrl(detailData.content_urls.desktop.page);
+  }
+
+  const classification = classifyDescription(description);
+  workType = classification.type || 'Unclassified';
+  creatorOrAuthor = classification.author || 'Not identified from source data';
+
+  // Look up the Wikiquote page's own heading/line structure whenever we're
+  // not looking at a disambiguation page - this now runs even for a direct
+  // "<type> by <author>" match, not just the ambiguous cases, because it
+  // serves two separate purposes:
+  //  1. Recovering a more specific work/author than the page-level
+  //     description (unchanged from before - still gated to non-direct
+  //     matches below, since a direct match is already confident).
+  //  2. Finding the literal source line that matches the submitted text - 
+  //     genuinely useful regardless of (1), since a high word-overlap score
+  //     against a title/snippet is not the same guarantee as "the user typed
+  //     this exactly right." That verbatim line becomes verifiedQuoteText,
+  //     shown to the user whenever it differs from what they submitted.
+  let verifiedQuoteText = null;
+
+  if (!isDisambiguation) {
+    try {
+      const sections = await fetchWikiquoteSections(workTitle);
+      if (isStale(requestId)) return null;
+      const match = findMatchingSection(sections, rawInput);
+      if (match) verifiedQuoteText = match.line;
+
+      if (!classification.isDirectWorkMatch) {
+        // headingPath is the full nesting chain down to the matched line. A
+        // page like "Founding Fathers..." nests Person > Work, so path length
+        // > 1 means the outer heading is likely the real author and the inner
+        // (deepest) heading is likely the specific work - hasNestedAuthor.
+        //
+        // A single-level heading (path.length === 1) is only trustworthy as
+        // "the work, with the page title as author" when the page is
+        // actually a person's page (e.g. "Mark Twain" -> heading "The
+        // Adventures of Tom Sawyer"). A Wikiquote page organized by THEME
+        // rather than by person or work (e.g. a page titled "Force" collecting
+        // Star Wars/physics/philosophy quotes under a heading also called
+        // "Force") has no author signal at all - trusting the page title as
+        // author there produced "Work: Force, Author: Force", a self-
+        // referential, confidently-wrong-looking result. isSelfReferential is
+        // a second, cheaper guard against the same failure mode: if the
+        // matched heading just restates the page's own title, it isn't
+        // telling us anything a specific-work claim should be built on.
+        // headingUsable additionally excludes structural boilerplate/index
+        // headings (see isUsableHeading) - findMatchingSection no longer
+        // filters those out itself, since even a line sitting under
+        // "Disputed" or "== L ==" is still worth surfacing as verifiedQuoteText.
+        const isSelfReferential = match && match.heading.trim().toLowerCase() === workTitle.trim().toLowerCase();
+        const hasNestedAuthor = match && match.headingPath.length > 1 && isUsableHeading(match.headingPath[0]);
+        const isTrustworthyMatch = match && match.headingUsable && !isSelfReferential && (hasNestedAuthor || classification.isPerson);
+
+        if (isTrustworthyMatch) {
+          const path = match.headingPath;
+          const inferredWork = match.heading;
+          const inferredAuthor = hasNestedAuthor ? path[0] : workTitle;
+
+          workTitle = inferredWork;
+          creatorOrAuthor = inferredAuthor;
+          workType = 'Specific work (identified from Wikiquote)';
+          searchSource += ' + Wikiquote Section Match';
+
+          // Parens matched via an unescaped pair inside a character class
+          // (where parens carry no special meaning) rather than the usual
+          // backslash-escaped form - same reasoning as the headingRe fix
+          // above: Google Apps Script's HtmlService re-embeds this file's
+          // raw source text into its own JS construct, and a literal
+          // escaped-paren pair in our source broke that step ("missing )
+          // after argument list") the same way the heading regex's
+          // backreference broke it as a false octal escape.
+          const cleanedHeading = inferredWork.replace(/\s*[(][^)]*[)]\s*$/, '').trim();
+          let recoveredDetail = false;
+          try {
+            const workDetail = await fetchJson(`${HTTPS_PREFIX}en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(cleanedHeading)}`);
+            if (isStale(requestId)) return null;
+            if (workDetail?.title && workDetail.type !== 'disambiguation') {
+              workTitle = workDetail.title;
+              if (workDetail.extract) { pageExtract = workDetail.extract; recoveredDetail = true; }
+              if (workDetail?.content_urls?.desktop?.page) pageUrl = safeUrl(workDetail.content_urls.desktop.page);
+            }
+          } catch (e) {
+            if (isStale(requestId)) return null;
+            // No dedicated Wikipedia page for the specific work title - fall through.
+          }
+          // The work itself has no standalone Wikipedia page - try the inferred
+          // author's page instead so there's still a useful summary/link, rather
+          // than silently keeping the original (often unrelated) collection-page extract.
+          if (!recoveredDetail && inferredAuthor && inferredAuthor !== workTitle) {
+            try {
+              const authorDetail = await fetchJson(`${HTTPS_PREFIX}en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(inferredAuthor)}`);
+              if (isStale(requestId)) return null;
+              if (authorDetail?.title && authorDetail.type !== 'disambiguation') {
+                pageExtract = authorDetail.extract || pageExtract;
+                if (authorDetail?.content_urls?.desktop?.page) pageUrl = safeUrl(authorDetail.content_urls.desktop.page);
+              }
+            } catch (e) {
+              if (isStale(requestId)) return null;
+            }
+          }
+        } else {
+          attributionOnly = true;
+          workType = 'Attributed quote (no specific work found)';
+          // Only credit workTitle as the author when the page was actually
+          // classified as a person (e.g. "Mark Twain") - a quote sitting under
+          // a filtered-out heading like "Disputed" on their own page still
+          // means we're confidently on the right person. A generic collection
+          // page (e.g. "Founding Fathers of the United States") is not itself
+          // an author, so leave that case as "not identified" instead of
+          // echoing the collection title back as its own creator.
+          if (classification.isPerson) creatorOrAuthor = workTitle;
+        }
+      }
+    } catch (e) {
+      if (isStale(requestId)) return null;
+      errFlag.record(e, 'Wikiquote section lookup');
+    }
+  }
+
+  if (isStale(requestId)) return null;
+
+  if (!pageExtract) {
+    pageExtract = isDisambiguation
+      ? 'This title resolved to a disambiguation page rather than a specific work - try a more specific excerpt.'
+      : 'No summary extract available from live endpoint.';
+  }
+
+  const fetchedAssets = await fetchLiveMediaAssets(workTitle, isMediaType(workType), errFlag);
+  if (isStale(requestId)) return null;
+
+  return {
+    workTitle, creatorOrAuthor, workType, searchSource,
+    pageExtract, pageUrl, fetchedAssets, verifiedQuoteText,
+    matched: !isDisambiguation, hadNetworkError: errFlag.hadNetworkError,
+    hadAnyError: errFlag.hadAnyError, errorSummary: errFlag.describe(),
+    confidence: candidate.score, isDisambiguation, attributionOnly
+  };
+}
+
+// ---------- Live data fetches ----------
+
+// Both lookups here previously caught their own failures with only a
+// console.warn - meaning a failed asset fetch never reached the caller at
+// all, so "one or more secondary lookups failed" in the banner was never
+// actually true for this stage no matter how many times it failed. Recording
+// into the shared errFlag makes that failure visible like every other stage.
+// iTunes cover-art and the Wikipedia thumbnail are fully independent lookups
+// but were previously awaited one after another - pure wasted latency, since
+// neither depends on the other's result. Run them with Promise.all instead.
+// Both failures are recorded as cosmetic: these are decorative images, not
+// core resolution data, so a flaky iTunes rate-limit (the same class of
+// unreliability that ruled out adding Google Books as a source) shouldn't
+// mark an otherwise-good match as a network error and block it from caching.
+async function fetchLiveMediaAssets(queryTerm, includeItunes, errFlag) {
+  const assets = [];
+
+  const itunesPromise = includeItunes
+    ? fetchJson(`${HTTPS_PREFIX}itunes.apple.com/search?term=${encodeURIComponent(queryTerm)}&limit=1`)
+      .catch(e => { errFlag.record(e, 'iTunes asset lookup', { cosmetic: true }); return null; })
+    : Promise.resolve(null);
+
+  const wikiPromise = fetchJson(`${HTTPS_PREFIX}en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(queryTerm)}`)
+    .catch(e => { errFlag.record(e, 'Wikipedia thumbnail lookup', { cosmetic: true }); return null; });
+
+  const [itunesData, wikiData] = await Promise.all([itunesPromise, wikiPromise]);
+
+  const item = itunesData?.results?.[0];
+  if (item) {
+    const rawArt = item.artworkUrl100 || item.artworkUrl60;
+    if (rawArt) {
+      const highResArt = rawArt.replace('100x100bb', '600x600bb').replace('60x60bb', '600x600bb');
+      assets.push({
+        url: highResArt,
+        label: `Verified Asset (${item.kind || item.wrapperType || 'Media'}) - ${item.trackName || item.collectionName || queryTerm}`
+      });
+    }
+  }
+
+  if (wikiData?.thumbnail?.source) {
+    assets.push({ url: wikiData.thumbnail.source, label: 'Wikipedia Archive Visual Index' });
+  }
+
+  return assets;
+}
+
+// ---------- Rendering ----------
+
+// A shimmering placeholder shaped like the eventual result card, shown while
+// a search is in flight - replaces the old plain-text-only loading banner,
+// which left the whole panel blank for however long the fetch chain takes.
+function loadingSkeletonHtml(message) {
+  return `
+    <div class="status-banner status-info"> ${escapeHtml(message)}</div>
+    <div class="skeleton-hero">
+      <div class="skeleton skeleton-line w-30"></div>
+      <div class="skeleton skeleton-line w-55"></div>
+      <div class="skeleton skeleton-line w-70"></div>
+      <div class="skeleton skeleton-line w-100"></div>
+      <div class="skeleton-grid">
+        <div class="skeleton skeleton-card"></div>
+        <div class="skeleton skeleton-card"></div>
+      </div>
+    </div>
+    <div class="skeleton-grid">
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+    </div>
+  `;
+}
+
+function statusBannerHtml(data) {
+  if (data.isDisambiguation) {
+    return `<div class="status-banner status-warn">[!] Resolved to a disambiguation page, not a specific work - try adding more context to the excerpt.</div>`;
+  }
+  if (!data.matched && data.hadNetworkError) {
+    const detail = data.errorSummary ? ` (${escapeHtml(data.errorSummary)})` : '';
+    return `<div class="status-banner status-error">[X] Resolution failed${detail} - result below may be incomplete or unresolved. <button class="btn-secondary" id="retryBtn" type="button" style="margin-left:auto;">Retry</button></div>`;
+  }
+  if (!data.matched) {
+    return `<div class="status-banner status-warn">[!] No confident match found via Wikiquote/Wikipedia - showing submitted text as-is.</div>`;
+  }
+  const pct = Math.round((data.confidence || 0) * 100);
+  const errNote = data.hadAnyError && data.errorSummary ? ` (secondary lookup issue: ${escapeHtml(data.errorSummary)})` : '';
+  const attrNote = data.attributionOnly ? ' - Attributed to author only - no specific work isolated' : '';
+  return `<div class="status-banner">[OK] Resolution complete - Source: ${escapeHtml(data.searchSource)} - Confidence: ${pct}%${attrNote}${errNote}</div>`;
+}
+
+// A high word-overlap confidence score means "this text is clearly on the
+// source page" - it does not mean the user typed the quote exactly right.
+// When we recovered the literal source line (verifiedQuoteText, from the
+// Wikiquote wikitext line that matched), and it actually differs from what
+// was submitted, show it side by side so the user can see the real wording
+// rather than assuming their version was verbatim.
+function verifiedQuoteBoxHtml(data, currentRawInput) {
+  if (!data.verifiedQuoteText) return '';
+  // normalizeForContainment (strips punctuation) rather than normalizeQuery
+  // (lowercase/whitespace only) - otherwise a trailing comma or dash
+  // difference between the submission and the source's exact wikitext
+  // formatting triggered a spurious "you misquoted this" box for text that
+  // was, word-for-word, identical.
+  if (normalizeForContainment(data.verifiedQuoteText) === normalizeForContainment(currentRawInput)) return '';
+  return `
+    <div class="canonical-box verified-box">
+      <div class="label-row">
+        <span class="label">[OK] Verified Wording (as found in source)</span>
+        <button type="button" class="btn-copy-inline" id="copyVerifiedBtn">Copy</button>
+      </div>
+      <div class="quote-text">"${escapeHtml(data.verifiedQuoteText)}"</div>
+    </div>
+  `;
+}
+
+function renderResult(data, currentRawInput, onRetry) {
+  const res = document.getElementById('result');
+
+  let galleryHtml = `<div class="media-gallery">`;
+  if (data.fetchedAssets.length > 0) {
+    data.fetchedAssets.forEach(asset => {
+      galleryHtml += `
+        <div class="asset-card">
+          <img src="${escapeHtml(safeUrl(asset.url))}" class="asset-img" alt="${escapeHtml(asset.label)}" onerror="this.style.display='none'">
+          <div class="asset-caption">${escapeHtml(asset.label)}</div>
+        </div>
+      `;
+    });
+  } else {
+    galleryHtml += `
+      <div class="asset-card">
+        <div class="asset-img" style="display:flex;align-items:center;justify-content:center;color:var(--text-faint);font-family:var(--font-mono);font-size:12px;">
+          Media Asset Unavailable
+        </div>
+        <div class="asset-caption">Fallback State</div>
+      </div>
+    `;
+  }
+  galleryHtml += `</div>`;
+
+  // When nothing matched, pageUrl stays the '#' placeholder - rendering that
+  // as a normal-looking cyan link made it appear clickable when clicking it
+  // just jumps the page to top. Render inert text instead in that case.
+  const hasPageUrl = data.pageUrl && data.pageUrl !== '#';
+  const referenceLinkHtml = hasPageUrl
+    ? `<a href="${escapeHtml(data.pageUrl)}" target="_blank" rel="noopener noreferrer" style="color: var(--cyan-main); text-decoration: none;">View Reference Source -></a>`
+    : `<span style="color: var(--text-faint);">No reference source available</span>`;
+
+  // When attributionOnly, workTitle is just the person's own page title
+  // (no specific work was isolated) - labeling it "IDENTIFIED WORK" and
+  // repeating it in a "Work Title" card made the app look like it couldn't
+  // tell a person from a work, even though it correctly knows the
+  // difference internally (the status banner already says as much).
+  const workBadgeText = data.attributionOnly
+    ? '* Identified Author (no specific work found)'
+    : '* Identified Work / Source Title';
+  const workTitleCardValue = data.attributionOnly
+    ? 'Not isolated - attributed to author only'
+    : escapeHtml(data.workTitle);
+
+  const html = `
+    ${statusBannerHtml(data)}
+
+    <div class="match-hero">
+      <div class="work-title-badge">${workBadgeText}</div>
+      <h2 class="media-title">${escapeHtml(data.workTitle)}</h2>
+      <div class="media-author">Creator / Author: ${escapeHtml(data.creatorOrAuthor)}</div>
+      <div class="media-meta">Dynamic Quote Resolution Target - ${referenceLinkHtml}</div>
+
+      ${galleryHtml}
+
+      <div class="canonical-box">
+        <span class="label">Submitted Excerpt / Quote</span>
+        <div class="quote-text">"${escapeHtml(currentRawInput)}"</div>
+      </div>
+
+      ${verifiedQuoteBoxHtml(data, currentRawInput)}
+
+      <div class="action-row" style="margin-top:16px; margin-bottom:0;">
+        <button type="button" class="btn-secondary" id="copyCitationBtn">Copy Citation</button>
+      </div>
+    </div>
+
+    <div class="section-header">Resolution Index & Parameters</div>
+    <div class="grid-cards">
+      <div class="info-card">
+        <div class="card-title">Work Type</div>
+        <div class="card-value">${escapeHtml(data.workType)}</div>
+      </div>
+      <div class="info-card">
+        <div class="card-title">Work Title</div>
+        <div class="card-value">${workTitleCardValue}</div>
+      </div>
+      <div class="info-card">
+        <div class="card-title">Creator / Author</div>
+        <div class="card-value">${escapeHtml(data.creatorOrAuthor)}</div>
+      </div>
+      <div class="info-card">
+        <div class="card-title">Match Confidence</div>
+        <div class="card-value">${Math.round((data.confidence || 0) * 100)}%</div>
+        ${confidenceMeterHtml(data.confidence)}
+      </div>
+    </div>
+
+    <div class="section-header">Encyclopedic & Factual Summary</div>
+    <div class="trivia-list">
+      <div class="trivia-item">
+        <div class="trivia-bullet">-</div>
+        <div class="trivia-text">${escapeHtml(data.pageExtract)}</div>
+      </div>
+    </div>
+  `;
+
+  res.innerHTML = html;
+  revealResult(res);
+
+  const retryBtn = document.getElementById('retryBtn');
+  if (retryBtn) retryBtn.onclick = onRetry || (() => analyze());
+
+  const copyCitationBtn = document.getElementById('copyCitationBtn');
+  if (copyCitationBtn) {
+    copyCitationBtn.onclick = () => copyToClipboard(buildCitationText(data, currentRawInput), copyCitationBtn);
+  }
+
+  const copyVerifiedBtn = document.getElementById('copyVerifiedBtn');
+  if (copyVerifiedBtn) {
+    copyVerifiedBtn.onclick = () => copyToClipboard(data.verifiedQuoteText, copyVerifiedBtn);
+  }
+}
+
+// ---------- "Did you mean" candidate picker ----------
+
+function renderCandidatePicker(candidates, rawInput, onPick, onNone) {
+  const res = document.getElementById('result');
+
+  const itemsHtml = candidates.map((c, i) => `
+    <button class="btn-candidate" data-idx="${i}" type="button">
+      <span class="candidate-score">${Math.round(c.score * 100)}%</span>
+      <span class="candidate-title">${escapeHtml(c.title)}</span>
+      <span class="candidate-source">${escapeHtml(c.sourceLabel)}</span>
+      ${c.snippet ? `<span class="candidate-snippet">${escapeHtml(c.snippet)}</span>` : ''}
+      ${confidenceMeterHtml(c.score)}
+    </button>
+  `).join('');
+
+  res.innerHTML = `
+    <div class="status-banner status-warn">[!] No single confident match - pick the closest source below, or dismiss if none are related.</div>
+    <div class="candidate-list">${itemsHtml}</div>
+    <div class="action-row" style="margin-top:14px;">
+      <button class="btn-secondary" id="noneOfTheseBtn" type="button">None of these - show as submitted</button>
+    </div>
+  `;
+  revealResult(res);
+
+  candidates.forEach((c, i) => {
+    const candidateBtn = res.querySelector(`.btn-candidate[data-idx="${i}"]`);
+    candidateBtn.onclick = () => {
+      // Immediate visual feedback on the clicked card before the whole panel
+      // is replaced by the loading skeleton - previously the picker just
+      // vanished with no acknowledgment of which card was chosen. settle()
+      // (which onPick calls into) overwrites res.innerHTML synchronously, so
+      // without deferring, the browser never gets a chance to paint this
+      // state at all - it would be clobbered in the same tick. Double
+      // requestAnimationFrame reliably waits for one real paint first.
+      res.querySelectorAll('.btn-candidate').forEach(b => { b.disabled = true; });
+      candidateBtn.classList.add('btn-candidate-selected');
+      requestAnimationFrame(() => requestAnimationFrame(() => onPick(c)));
+    };
+  });
+  document.getElementById('noneOfTheseBtn').onclick = onNone;
+}
+
+// ---------- Main flow ----------
+
+async function analyze() {
+  const inputEl = document.getElementById('input');
+  const rawInput = inputEl.value.trim();
+  const res = document.getElementById('result');
+  const btn = document.getElementById('identifyBtn');
+
+  if (!rawInput) {
+    inputEl.focus();
+    return;
+  }
+
+  // Start a new request generation. Any earlier in-flight request becomes
+  // "stale" the moment activeRequestId changes - see isStale() - so its
+  // eventual result (or timeout/error) is discarded rather than rendered.
+  const requestId = ++activeRequestId;
+  updateShareUrl(rawInput);
+
+  const normalized = normalizeQuery(rawInput);
+  const cached = resultCache.get(normalized);
+  if (cached) {
+    res.style.display = 'block';
+    renderResult(cached, rawInput);
+    addSearchToHistory(rawInput, cached.workTitle, cached.creatorOrAuthor, cached.workType);
+    return;
+  }
+
+  res.style.display = 'block';
+  res.innerHTML = loadingSkeletonHtml('Interrogating Wikiquote & Wikipedia...');
+
+  // Resolves one chosen candidate (or null, meaning "no match") into final
+  // result data, caches it, renders it, and restores the button state. Bails
+  // immediately if a newer search has already started (e.g. this got called
+  // from a "did you mean" picker button the user clicked just as they also
+  // launched a fresh search) - otherwise it would stomp the new search's
+  // in-progress UI with a stale "fetching metadata..." message. Takes the
+  // search-phase error tracker as a parameter (rather than closing over one
+  // fixed outer variable) so a Retry that redoes the search via
+  // runSearchAndDecide() gets a genuinely fresh tracker each time, not one
+  // that keeps accumulating state across every retry in this analyze() call.
+  const settle = async (candidate, searchErrFlag) => {
+    if (isStale(requestId)) return;
+
+    // A fresh-per-attempt tracker rather than reusing searchErrFlag directly -
+    // when resolving a specific candidate, only seed the informational kinds
+    // (not criticalKinds) from the candidate-search phase - a search-phase
+    // hiccup is still worth a mention, but shouldn't forever block caching of
+    // an otherwise cleanly-resolved candidate. The null-candidate ("no
+    // match") path keeps the full clone, since a genuine search failure there
+    // SHOULD still distinguish "resolution failed" from "no confident match
+    // found".
+    const attemptErrFlag = candidate ? seedErrorTracker(searchErrFlag) : cloneErrorTracker(searchErrFlag);
+
+    btn.disabled = true;
+    btn.textContent = 'Searching...';
+    res.innerHTML = loadingSkeletonHtml(candidate ? `Candidate: "${candidate.title}" - fetching metadata...` : 'No confident match - finalizing...');
+
+    let resultData;
+    if (candidate) {
+      // Races the whole resolution chain (summary + Wikiquote sections + work/
+      // author fallback + asset fetches) against one overall wall-clock budget,
+      // on top of each individual fetch's own REQUEST_TIMEOUT_MS - several
+      // sequential stages each hitting a transient failure (and its one retry)
+      // could otherwise leave the button on "Searching..." for a minute-plus.
+      try {
+        resultData = await Promise.race([
+          resolveCandidate(candidate, rawInput, requestId, attemptErrFlag),
+          timeoutRejection(OVERALL_TIMEOUT_MS)
+        ]);
+      } catch (e) {
+        if (isStale(requestId)) return;
+        attemptErrFlag.record(e, 'Overall resolution');
+        resultData = null;
+      }
+      if (isStale(requestId)) return; // stale - a newer search superseded this one
+      if (resultData === null) {
+        resultData = {
+          workTitle: candidate.title, creatorOrAuthor: 'Not identified from source data', workType: 'Unclassified',
+          searchSource: `${candidate.sourceLabel} Search`, pageExtract: 'Resolution did not complete in time.',
+          pageUrl: '#', fetchedAssets: [], verifiedQuoteText: null, matched: false, hadNetworkError: true,
+          hadAnyError: true, errorSummary: attemptErrFlag.describe(),
+          confidence: candidate.score, isDisambiguation: false, attributionOnly: false
+        };
+      }
+    } else {
+      resultData = {
+        workTitle: rawInput, creatorOrAuthor: 'Not identified from source data', workType: 'Unclassified',
+        searchSource: 'None', pageExtract: 'No matching work identified - this is the submitted text as entered.',
+        pageUrl: '#', fetchedAssets: [], verifiedQuoteText: null, matched: false, hadNetworkError: attemptErrFlag.hadNetworkError,
+        hadAnyError: attemptErrFlag.hadAnyError, errorSummary: attemptErrFlag.describe(),
+        confidence: 0, isDisambiguation: false, attributionOnly: false
+      };
+    }
+
+    if (isStale(requestId)) return;
+
+    // A failed lookup (rate-limited, network blip, etc.) is transient - caching
+    // it would mean Retry (or just resubmitting the same quote) permanently
+    // replays the failure instead of ever hitting the API again. A genuine
+    // "no match found" is a stable fact about the quote and is still worth
+    // caching; only skip caching the actual error case.
+    if (!resultData.hadNetworkError) {
+      resultCache.set(normalized, resultData);
+      addSearchToHistory(rawInput, resultData.workTitle, resultData.creatorOrAuthor, resultData.workType);
+    }
+    // A real candidate retries by re-resolving just that candidate - nothing
+    // about which candidate to use is in question, so re-running the whole
+    // search would be wasted work and risks landing on a different pick.
+    // A failed SEARCH (no candidate at all) has nothing to re-resolve: the
+    // previous version of this retried by rebuilding an identical result
+    // from the same already-known error state every time, so clicking Retry
+    // was a complete no-op no matter how many times it was clicked or how
+    // long an outage had cleared. Retrying that case has to redo the search
+    // itself via runSearchAndDecide().
+    const onRetry = candidate ? (() => settle(candidate, searchErrFlag)) : (() => runSearchAndDecide());
+    renderResult(resultData, rawInput, onRetry);
+
+    btn.disabled = false;
+    btn.textContent = 'Identify Quote';
+  };
+
+  // Runs (or re-runs, for Retry on a failed search) the candidate search and
+  // the auto-accept / picker / no-match decision. Pulled out of the top-level
+  // analyze() body so Retry can redo this whole step with a fresh error
+  // tracker, not just re-render whatever the last attempt already knew.
+  const runSearchAndDecide = async () => {
+    if (isStale(requestId)) return;
+    btn.disabled = true;
+    btn.textContent = 'Searching...';
+    res.innerHTML = loadingSkeletonHtml('Interrogating Wikiquote & Wikipedia...');
+
+    const searchErrFlag = createErrorTracker();
+    let candidates = [];
+    try {
+      candidates = await gatherCandidates(rawInput, requestId, searchErrFlag);
+    } catch (e) {
+      if (isStale(requestId)) return;
+      searchErrFlag.record(e, 'Candidate search');
+    }
+    if (isStale(requestId)) return;
+
+    if (candidates.length === 0) {
+      await settle(null, searchErrFlag);
+      return;
+    }
+
+    // A high top score alone isn't enough to auto-accept: a quote that's been
+    // widely parodied/referenced (sitcom riffs, "metaphor" explainer articles,
+    // etc.) can produce several unrelated pages tied at or near a perfect word-
+    // overlap score, with the actual canonical source not even among them.
+    // Auto-accept only when the leader is both confident AND clearly ahead of
+    // the runner-up - otherwise a tie is itself a sign to ask the user.
+    const top = candidates[0];
+    const second = candidates[1];
+    const clearlyAhead = !second || (top.score - second.score) >= AUTO_ACCEPT_MARGIN;
+    // A very short input (2-3 words) can hit a high, clearly-ahead score purely
+    // by coincidence - MIN_CONTAINMENT_QUERY_CHARS already gates the deeper
+    // verified-quote-line matching for the same reason; auto-accept had no
+    // equivalent floor, so a short query could auto-commit to an unrelated page.
+    const longEnoughForAutoAccept = normalizeForContainment(rawInput).length >= MIN_CONTAINMENT_QUERY_CHARS;
+    if (top.score >= AUTO_ACCEPT_SCORE && clearlyAhead && longEnoughForAutoAccept) {
+      await settle(top, searchErrFlag);
+      return;
+    }
+
+    const viable = candidates.filter(c => c.score >= MIN_CANDIDATE_SCORE);
+    if (viable.length === 0) {
+      await settle(null, searchErrFlag);
+      return;
+    }
+
+    // Confidence is too spread out to auto-pick - let the user choose instead
+    // of silently committing to a possibly-wrong top search hit.
+    btn.disabled = false;
+    btn.textContent = 'Identify Quote';
+    renderCandidatePicker(viable, rawInput, (chosen) => settle(chosen, searchErrFlag), () => settle(null, searchErrFlag));
+  };
+
+  await runSearchAndDecide();
+}
+</script>
+
+</body>
+</html>
